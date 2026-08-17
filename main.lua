@@ -38,12 +38,6 @@ local waterWalkPart = nil
 local autoSafeEnabled = false
 local autoSafeConnection = nil
 local openedUIs = {}
-local autoLevelEnabled = false
-local autoLevelConnection = nil
-local slotPressed = false
-local questAccepted = false
-local questEnemyName = nil
-local lastClickTime = 0
 local espEnabled = false
 local espObjects = {}
 local aimbotEnabled = false
@@ -55,6 +49,9 @@ local auraRange = 3
 local playerHitboxEnabled = false
 local playerHitboxSize = 2
 local playerHitboxTransparent = true
+local chestList = {}
+local lastChestScan = 0
+local farmRange = 5000
 
 local ISLANDS = {
     {name = "Tiki Outpost", search = {"tiki", "outpost"}},
@@ -77,186 +74,44 @@ local UI_MENUS = {
     {name = "Shop", uiName = "Shop"},
 }
 
+local function flyToFlower(flowerName)
+    local flowersFolder = workspace:FindFirstChild("Flowers")
+    if flowersFolder then
+        for _, flower in pairs(flowersFolder:GetChildren()) do
+            if flower.Name == flowerName or flower.Name:lower() == flowerName:lower() then
+                local pos = nil
+                if flower:IsA("BasePart") then
+                    pos = flower.Position
+                elseif flower:IsA("Model") then
+                    if flower.PrimaryPart then
+                        pos = flower.PrimaryPart.Position
+                    else
+                        local part = flower:FindFirstChildOfClass("BasePart")
+                        if part then pos = part.Position end
+                    end
+                end
+                if pos then
+                    flyToPosition(pos + Vector3.new(0, 3, 0))
+                    return
+                end
+            end
+        end
+    end
+end
+
 local function flyToPlayer(targetPlayer)
     if not targetPlayer then return end
     local char = targetPlayer.Character
     if not char then return end
-    
     local root = char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    
     flyToPosition(root.Position + Vector3.new(0, 3, 0))
 end
 
 local function hopServer()
     pcall(function()
-        TeleportService:Teleport(game.PlaceId, player)
+        TeleportService:Teleport(2753915549, player)
     end)
-end
-
-local function getPlayerLevel()
-    local level = 0
-    pcall(function()
-        local leaderstats = player:FindFirstChild("leaderstats")
-        if leaderstats then
-            local lvl = leaderstats:FindFirstChild("Level") or leaderstats:FindFirstChild("level")
-            if lvl then level = lvl.Value end
-        end
-    end)
-    return level
-end
-
-local function getAllGivers()
-    local givers = {}
-    local npcsFolder = workspace:FindFirstChild("NPCs")
-    if npcsFolder then
-        for _, npc in pairs(npcsFolder:GetChildren()) do
-            local n = npc.Name:lower()
-            if n:find("giver") or n:find("quest") then
-                if npc:IsA("Model") and npc.PrimaryPart then
-                    table.insert(givers, {npc = npc, pos = npc.PrimaryPart.Position, name = npc.Name})
-                elseif npc:IsA("BasePart") then
-                    table.insert(givers, {npc = npc, pos = npc.Position, name = npc.Name})
-                end
-            end
-        end
-    end
-    return givers
-end
-
-local function findNearestGiver()
-    local char = player.Character
-    if not char then return nil end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    
-    local givers = getAllGivers()
-    if #givers == 0 then return nil end
-    
-    table.sort(givers, function(a, b)
-        return (a.pos - root.Position).Magnitude < (b.pos - root.Position).Magnitude
-    end)
-    
-    return givers[1]
-end
-
-local function clickNPC(npc)
-    local npcPos = nil
-    if npc:IsA("BasePart") then npcPos = npc.Position
-    elseif npc:IsA("Model") and npc.PrimaryPart then npcPos = npc.PrimaryPart.Position end
-    
-    if not npcPos then return end
-    
-    local screenPos = camera:WorldToScreenPoint(npcPos)
-    if screenPos.Z > 0 then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 1)
-            wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
-        end)
-    end
-end
-
-local function getAllButtons()
-    local buttons = {}
-    for _, gui in pairs(playerGui:GetChildren()) do
-        pcall(function()
-            local function search(parent)
-                for _, child in pairs(parent:GetChildren()) do
-                    if child:IsA("TextButton") and child.Visible and child.Text ~= "" then
-                        table.insert(buttons, child)
-                    end
-                    search(child)
-                end
-            end
-            search(gui)
-        end)
-    end
-    return buttons
-end
-
-local function clickButton(btn)
-    pcall(function()
-        local connections = getconnections(btn.MouseButton1Click)
-        for _, conn in pairs(connections) do conn.Fire() end
-        local activated = getconnections(btn.Activated)
-        for _, conn in pairs(activated) do conn.Fire() end
-    end)
-end
-
-local function smartQuestClick()
-    local level = getPlayerLevel()
-    local buttons = getAllButtons()
-    
-    for _, btn in pairs(buttons) do
-        local num = btn.Text:match("(%d+)")
-        if num then
-            local btnLevel = tonumber(num)
-            if btnLevel and btnLevel <= level and level < btnLevel + 200 then
-                questEnemyName = btn.Text
-                clickButton(btn)
-                return true
-            end
-        end
-    end
-    
-    for _, btn in pairs(buttons) do
-        local text = btn.Text:lower()
-        if text:find("accept") or text:find("start") or text:find("take") or text:find("yes") or text:find("ok") or text:find("go") then
-            clickButton(btn)
-            questAccepted = true
-            return true
-        end
-    end
-    
-    for _, btn in pairs(buttons) do
-        local text = btn.Text:lower()
-        if text:find("continue") or text:find("next") then
-            clickButton(btn)
-            return true
-        end
-    end
-    
-    return false
-end
-
-local function pressSlot1Once()
-    if slotPressed then return end
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-    wait(0.05)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-    slotPressed = true
-end
-
-local function clickScreen()
-    VirtualInputManager:SendMouseButtonEvent(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2, 0, true, game, 1)
-    wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2, 0, false, game, 1)
-end
-
-local function findAimbotTarget()
-    local nearest = nil
-    local nearestDist = aimbotFOV
-    
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character then
-            local targetPart = plr.Character:FindFirstChild(aimbotPart)
-            if targetPart then
-                local screenPos, onScreen = camera:WorldToScreenPoint(targetPart.Position)
-                if onScreen then
-                    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
-                    local distFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                    
-                    if distFromCenter < aimbotFOV and distFromCenter < nearestDist then
-                        nearestDist = distFromCenter
-                        nearest = targetPart
-                    end
-                end
-            end
-        end
-    end
-    
-    return nearest
 end
 
 local function openUI(uiName)
@@ -291,7 +146,6 @@ local function makeSafeZone()
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local basePos = root and root.Position or Vector3.new(0, 0, 0)
-    
     safeZonePart = Instance.new("Part")
     safeZonePart.Name = "SafeZone"
     safeZonePart.Size = Vector3.new(200, 2, 200)
@@ -310,11 +164,9 @@ local function flyToPosition(targetPos)
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    
     if flyConnection then flyConnection:Disconnect() end
     flying = true
     flyTarget = targetPos
-    
     noclipEnabled = true
     if noclipConnection then noclipConnection:Disconnect() end
     noclipConnection = RunService.Stepped:Connect(function()
@@ -324,14 +176,12 @@ local function flyToPosition(targetPos)
             end
         end
     end)
-    
     flyConnection = RunService.Heartbeat:Connect(function(dt)
         if not flying then return end
         local char = player.Character
         if not char then return end
         local root = char:FindFirstChild("HumanoidRootPart")
         if not root then return end
-        
         local dist = (flyTarget - root.Position).Magnitude
         if dist < 3 then
             flying = false
@@ -408,235 +258,67 @@ local function removeWaterWalk()
     if waterWalkPart then waterWalkPart:Destroy(); waterWalkPart = nil end
 end
 
-local function findAllChests()
-    local chests = {}
+local function scanChests()
+    chestList = {}
     local chestModels = workspace:FindFirstChild("ChestModels")
     if chestModels then
-        for _, c in pairs(chestModels:GetChildren()) do
-            local pos = nil
-            if c:IsA("BasePart") then pos = c.Position
-            elseif c:IsA("Model") and c.PrimaryPart then pos = c.PrimaryPart.Position end
-            if pos then table.insert(chests, pos) end
-        end
-    end
-    if #chests == 0 then
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj.Name:lower():find("chest") then
-                local pos = nil
-                if obj:IsA("BasePart") then pos = obj.Position
-                elseif obj:IsA("Model") and obj.PrimaryPart then pos = obj.PrimaryPart.Position end
-                if pos then table.insert(chests, pos) end
-            end
-        end
-    end
-    return chests
-end
-
-local function findQuestEnemy()
-    local char = player.Character
-    if not char then return nil end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    
-    local enemies = {}
-    
-    for _, folderName in pairs({"Enemies", "NPCs"}) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then
-            for _, obj in pairs(folder:GetChildren()) do
-                local pos = getPosition(obj)
-                if pos then
-                    if questEnemyName then
-                        local enemyName = obj.Name:lower()
-                        local questName = questEnemyName:lower()
-                        if enemyName:find(questName) or questName:find(enemyName) then
-                            table.insert(enemies, obj)
-                        end
-                    else
-                        local n = obj.Name:lower()
-                        if not n:find("giver") and not n:find("gacha") and not n:find("shop") and not n:find("dealer") then
-                            table.insert(enemies, obj)
-                        end
-                    end
+        for _, chest in pairs(chestModels:GetChildren()) do
+            if chest:IsA("Model") then
+                local primary = chest.PrimaryPart or chest:FindFirstChildOfClass("BasePart")
+                if primary then
+                    table.insert(chestList, primary)
                 end
+            elseif chest:IsA("BasePart") then
+                table.insert(chestList, chest)
             end
         end
     end
-    
-    if #enemies == 0 then
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and obj.PrimaryPart then
-                local n = obj.Name:lower()
-                if questEnemyName then
-                    local qn = questEnemyName:lower()
-                    if n:find(qn) or qn:find(n) then
-                        table.insert(enemies, obj)
-                    end
-                else
-                    if n:find("enemy") or n:find("mob") or n:find("boss") or n:find("bandit") or n:find("pirate") or n:find("marine") or n:find("soldier") or n:find("warrior") then
-                        table.insert(enemies, obj)
-                    end
-                end
-            end
-        end
-    end
-    
-    if #enemies == 0 then return nil end
-    
-    table.sort(enemies, function(a, b)
-        return (getPosition(a) - root.Position).Magnitude < (getPosition(b) - root.Position).Magnitude
-    end)
-    
-    return enemies[1]
-end
-
-local function getPosition(obj)
-    if obj:IsA("BasePart") then return obj.Position
-    elseif obj:IsA("Model") then
-        if obj.PrimaryPart then return obj.PrimaryPart.Position
-        else
-            local part = obj:FindFirstChildOfClass("BasePart")
-            if part then return part.Position end
-        end
-    end
-    return nil
 end
 
 local function startFarm()
     if farmConnection then farmConnection:Disconnect() end
-    farmConnection = RunService.RenderStepped:Connect(function()
+    scanChests()
+    farmConnection = RunService.Heartbeat:Connect(function()
         if not farmEnabled then return end
         local char = player.Character
         if not char then return end
         local root = char:FindFirstChild("HumanoidRootPart")
         if not root then return end
-        
         if noclipEnabled then
             for _, p in pairs(char:GetDescendants()) do
                 if p:IsA("BasePart") then p.CanCollide = false end
             end
         end
         
-        local chests = findAllChests()
-        if #chests == 0 then return end
+        if tick() - lastChestScan > 0.5 then
+            scanChests()
+            lastChestScan = tick()
+        end
         
-        table.sort(chests, function(a, b)
-            return (a - root.Position).Magnitude < (b - root.Position).Magnitude
-        end)
+        if #chestList == 0 then return end
         
-        root.CFrame = CFrame.new(chests[1] + Vector3.new(0, 3, 0))
+        local nearest = nil
+        local nearestDist = math.huge
+        
+        for _, chest in pairs(chestList) do
+            if chest and chest.Parent then
+                local dist = (chest.Position - root.Position).Magnitude
+                if dist < nearestDist and dist < farmRange then
+                    nearestDist = dist
+                    nearest = chest
+                end
+            end
+        end
+        
+        if nearest then
+            root.CFrame = CFrame.new(nearest.Position + Vector3.new(0, 3, 0))
+        end
     end)
 end
 
 local function stopFarmFarm()
     if farmConnection then farmConnection:Disconnect(); farmConnection = nil end
 end
-
-local function startAutoLevel()
-    if autoLevelConnection then autoLevelConnection:Disconnect() end
-    slotPressed = false
-    questAccepted = false
-    questEnemyName = nil
-    local giverWaitTime = 0
-    local lastGiverPos = nil
-    
-    autoLevelConnection = RunService.RenderStepped:Connect(function(dt)
-        if not autoLevelEnabled then return end
-        local char = player.Character
-        if not char then slotPressed = false; return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then slotPressed = false; return end
-        
-        if noclipEnabled then
-            for _, p in pairs(char:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = false end
-            end
-        end
-        
-        if not questAccepted then
-            local giver = findNearestGiver()
-            if giver then
-                local dist = (giver.pos - root.Position).Magnitude
-                
-                if dist > 3 then
-                    root.CFrame = CFrame.new(giver.pos + Vector3.new(0, 3, 0))
-                    giverWaitTime = 0
-                else
-                    if lastGiverPos and (lastGiverPos - giver.pos).Magnitude < 1 then
-                        giverWaitTime = giverWaitTime + dt
-                    else
-                        giverWaitTime = 0
-                        lastGiverPos = giver.pos
-                    end
-                    
-                    if tick() - lastClickTime > 0.5 then
-                        clickNPC(giver.npc)
-                        smartQuestClick()
-                        lastClickTime = tick()
-                    end
-                    
-                    if giverWaitTime > 5 then
-                        local enemy = findQuestEnemy()
-                        if enemy then
-                            local enemyPos = getPosition(enemy)
-                            if enemyPos then
-                                root.CFrame = CFrame.new(enemyPos + Vector3.new(0, 6, 0))
-                                questAccepted = true
-                            end
-                        end
-                    end
-                end
-            end
-        else
-            local enemy = findQuestEnemy()
-            if enemy then
-                local enemyPos = getPosition(enemy)
-                if enemyPos then
-                    root.CFrame = CFrame.new(enemyPos + Vector3.new(0, 6, 0))
-                    pressSlot1Once()
-                    clickScreen()
-                end
-            else
-                questAccepted = false
-                slotPressed = false
-                questEnemyName = nil
-            end
-        end
-    end)
-end
-
-local function stopAutoLevel()
-    if autoLevelConnection then autoLevelConnection:Disconnect(); autoLevelConnection = nil end
-    slotPressed = false
-end
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.F7 then
-        autoLevelEnabled = false
-        stopAutoLevel()
-    elseif input.KeyCode == Enum.KeyCode.F8 then
-        farmEnabled = false
-        flying = false
-        showHitboxes = false
-        infJumpEnabled = false
-        autoSafeEnabled = false
-        autoLevelEnabled = false
-        espEnabled = false
-        aimbotEnabled = false
-        auraEnabled = false
-        playerHitboxEnabled = false
-        if autoSafeConnection then autoSafeConnection:Disconnect() end
-        stopFarmFarm()
-        stopFlying()
-        stopAutoLevel()
-        toggleNoclip(false)
-        removeWaterWalk()
-        closeAllUIs()
-        if safeZonePart then safeZonePart:Destroy() end
-        sg:Destroy()
-    end
-end)
 
 local function findIsland(island)
     for _, obj in pairs(workspace:GetDescendants()) do
@@ -658,9 +340,7 @@ local function updateESP()
         if obj and obj.Parent then obj:Destroy() end
     end
     espObjects = {}
-    
     if not espEnabled then return end
-    
     for _, plr in pairs(Players:GetPlayers()) do
         if plr ~= player and plr.Character and plr.Character:FindFirstChild("Head") then
             local head = plr.Character.Head
@@ -670,13 +350,11 @@ local function updateESP()
             bb.AlwaysOnTop = true
             bb.Adornee = head
             bb.Parent = head
-            
             local bg = Instance.new("Frame")
             bg.Size = UDim2.new(1, 0, 1, 0)
             bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             bg.BackgroundTransparency = 0.5
             bg.Parent = bb
-            
             local label = Instance.new("TextLabel")
             label.Size = UDim2.new(1, 0, 1, 0)
             label.BackgroundTransparency = 1
@@ -685,7 +363,6 @@ local function updateESP()
             label.TextSize = 10
             label.Font = Enum.Font.GothamBold
             label.Parent = bg
-            
             table.insert(espObjects, bb)
         end
     end
@@ -697,6 +374,28 @@ spawn(function()
         wait(2)
     end
 end)
+
+local function findAimbotTarget()
+    local nearest = nil
+    local nearestDist = aimbotFOV
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= player and plr.Character then
+            local targetPart = plr.Character:FindFirstChild(aimbotPart)
+            if targetPart then
+                local screenPos, onScreen = camera:WorldToScreenPoint(targetPart.Position)
+                if onScreen then
+                    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+                    local distFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if distFromCenter < aimbotFOV and distFromCenter < nearestDist then
+                        nearestDist = distFromCenter
+                        nearest = targetPart
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
 
 RunService.RenderStepped:Connect(function()
     if aimbotEnabled then
@@ -736,7 +435,6 @@ RunService.Heartbeat:Connect(function()
             playerHitboxPart.Color = Color3.fromRGB(0, 255, 255)
             playerHitboxPart.Material = Enum.Material.Neon
             playerHitboxPart.Parent = workspace
-            
             local weld = Instance.new("Weld")
             weld.Part0 = root
             weld.Part1 = playerHitboxPart
@@ -750,6 +448,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- GUI
 local sg = Instance.new("ScreenGui")
 sg.Name = "BFHub"
 sg.ResetOnSpawn = false
@@ -786,7 +485,7 @@ local headerText = Instance.new("TextLabel")
 headerText.Size = UDim2.new(0.6, 0, 1, 0)
 headerText.Position = UDim2.new(0, 15, 0, 0)
 headerText.BackgroundTransparency = 1
-headerText.Text = "BLOX FRUITS HUB"
+headerText.Text = "BF HUB"
 headerText.TextColor3 = Color3.new(1,1,1)
 headerText.TextSize = 17
 headerText.Font = Enum.Font.GothamBold
@@ -912,14 +611,12 @@ local function makeSlider(parent, text, min, max, def, cb)
     Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
     
     local dragging = false
-    
     bg2.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
     end)
     bg2.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
     end)
-    
     UserInputService.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local mousePos = UserInputService:GetMouseLocation()
@@ -947,19 +644,27 @@ local function makeButton(parent, text, cb, color)
     btn.MouseButton1Click:Connect(function() if cb then cb() end end)
 end
 
+-- FARM
 makeToggle(contents[1], "Auto Farm Chest", false, function(v)
     farmEnabled = v
     if v then toggleNoclip(true); startFarm() else stopFarmFarm() end
 end)
-makeToggle(contents[1], "Auto Level + Quest", false, function(v)
-    autoLevelEnabled = v
-    if v then toggleNoclip(true); startAutoLevel() else stopAutoLevel() end
-end)
+
+makeButton(contents[1], "🌸 Flower1", function()
+    flyToFlower("Flower1")
+end, Color3.fromRGB(255, 150, 200))
+
+makeButton(contents[1], "🌸 Flower2", function()
+    flyToFlower("Flower2")
+end, Color3.fromRGB(255, 180, 200))
+
 makeToggle(contents[1], "Noclip", false, function(v) toggleNoclip(v) end)
 makeToggle(contents[1], "Anti AFK", true, function(v) antiAFKEnabled = v end)
 makeSlider(contents[1], "Speed", 50, 500, 200, function(v) flySpeed = v end)
-contents[1].CanvasSize = UDim2.new(0, 0, 0, 350)
+makeSlider(contents[1], "Farm Range", 100, 10000, 5000, function(v) farmRange = v end)
+contents[1].CanvasSize = UDim2.new(0, 0, 0, 450)
 
+-- SAFE
 makeToggle(contents[2], "Auto Safe", false, function(v)
     autoSafeEnabled = v
     if v then
@@ -991,6 +696,7 @@ makeButton(contents[2], "Stop", function() stopFlying() end, Color3.fromRGB(255,
 makeSlider(contents[2], "Speed", 50, 500, 200, function(v) flySpeed = v end)
 contents[2].CanvasSize = UDim2.new(0, 0, 0, 300)
 
+-- ISLANDS
 for _, island in pairs(ISLANDS) do
     makeButton(contents[3], "✈️ " .. island.name, function()
         local pos = findIsland(island)
@@ -1004,7 +710,6 @@ local playerListFrame = Instance.new("Frame")
 playerListFrame.Size = UDim2.new(1, 0, 0, 200)
 playerListFrame.BackgroundTransparency = 1
 playerListFrame.Parent = contents[3]
-
 local playerListLayout = Instance.new("UIListLayout")
 playerListLayout.Padding = UDim.new(0, 3)
 playerListLayout.Parent = playerListFrame
@@ -1014,7 +719,6 @@ spawn(function()
         for _, child in pairs(playerListFrame:GetChildren()) do
             if child:IsA("TextButton") then child:Destroy() end
         end
-        
         for _, plr in pairs(Players:GetPlayers()) do
             if plr ~= player then
                 local btn = Instance.new("TextButton")
@@ -1026,7 +730,6 @@ spawn(function()
                 btn.Font = Enum.Font.GothamBold
                 btn.Parent = playerListFrame
                 Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
-                
                 btn.MouseButton1Click:Connect(function()
                     flyToPlayer(plr)
                 end)
@@ -1039,29 +742,23 @@ end)
 makeSlider(contents[3], "Speed", 50, 500, 200, function(v) flySpeed = v end)
 contents[3].CanvasSize = UDim2.new(0, 0, 0, #ISLANDS * 45 + 300)
 
+-- UI
 for _, uiData in pairs(UI_MENUS) do
     makeButton(contents[4], "📋 " .. uiData.name, function()
         openUI(uiData.uiName)
     end, Color3.fromRGB(150, 100, 255))
 end
-
-makeButton(contents[4], "Close All", function()
-    closeAllUIs()
-end, Color3.fromRGB(255, 50, 50))
-
+makeButton(contents[4], "Close All", function() closeAllUIs() end, Color3.fromRGB(255, 50, 50))
 contents[4].CanvasSize = UDim2.new(0, 0, 0, #UI_MENUS * 45 + 60)
 
-makeButton(contents[5], "Hop", function()
-    hopServer()
-end, Color3.fromRGB(100, 100, 255))
-
+-- MISC
+makeButton(contents[5], "Hop", function() hopServer() end, Color3.fromRGB(100, 100, 255))
 makeToggle(contents[5], "No Fog", false, function(v)
     if v then
         Lighting.FogEnd = 100000
         Lighting.FogStart = 99999
     end
 end)
-
 makeToggle(contents[5], "Full Bright", false, function(v)
     if v then
         Lighting.Brightness = 5
@@ -1070,7 +767,6 @@ makeToggle(contents[5], "Full Bright", false, function(v)
         Lighting.Brightness = 2
     end
 end)
-
 makeToggle(contents[5], "ESP", false, function(v)
     espEnabled = v
     if not v then
@@ -1080,56 +776,30 @@ makeToggle(contents[5], "ESP", false, function(v)
         espObjects = {}
     end
 end)
-
 contents[5].CanvasSize = UDim2.new(0, 0, 0, 250)
 
+-- PLAYER
 makeSlider(contents[6], "Walk Speed", 16, 500, 16, function(v) walkSpeed = v end)
 makeSlider(contents[6], "Jump Power", 50, 500, 50, function(v) jumpPower = v end)
 makeToggle(contents[6], "Inf Jump", false, function(v) infJumpEnabled = v end)
 makeToggle(contents[6], "Water Walk", false, function(v)
     if v then createWaterWalk() else removeWaterWalk() end
 end)
-
 contents[6].CanvasSize = UDim2.new(0, 0, 0, 250)
 
-makeToggle(contents[7], "Aimbot", false, function(v)
-    aimbotEnabled = v
-end)
-
-makeButton(contents[7], "Target: Head", function()
-    aimbotPart = "Head"
-end, Color3.fromRGB(255, 100, 100))
-
-makeButton(contents[7], "Target: Body", function()
-    aimbotPart = "HumanoidRootPart"
-end, Color3.fromRGB(100, 100, 255))
-
-makeSlider(contents[7], "Smooth", 0.1, 1, 0.3, function(v)
-    aimbotSmoothness = v
-end)
-
-makeToggle(contents[7], "Aura", false, function(v)
-    auraEnabled = v
-end)
-
-makeSlider(contents[7], "Aura Range", 1, 10, 3, function(v)
-    auraRange = v
-end)
-
-makeToggle(contents[7], "Hitbox", false, function(v)
-    playerHitboxEnabled = v
-end)
-
-makeSlider(contents[7], "Hitbox Size", 1, 60, 2, function(v)
-    playerHitboxSize = v
-end)
-
-makeToggle(contents[7], "Transparent (no collide)", true, function(v)
-    playerHitboxTransparent = v
-end)
-
+-- PVP
+makeToggle(contents[7], "Aimbot", false, function(v) aimbotEnabled = v end)
+makeButton(contents[7], "Target: Head", function() aimbotPart = "Head" end, Color3.fromRGB(255, 100, 100))
+makeButton(contents[7], "Target: Body", function() aimbotPart = "HumanoidRootPart" end, Color3.fromRGB(100, 100, 255))
+makeSlider(contents[7], "Smooth", 0.1, 1, 0.3, function(v) aimbotSmoothness = v end)
+makeToggle(contents[7], "Aura", false, function(v) auraEnabled = v end)
+makeSlider(contents[7], "Aura Range", 1, 10, 3, function(v) auraRange = v end)
+makeToggle(contents[7], "Hitbox", false, function(v) playerHitboxEnabled = v end)
+makeSlider(contents[7], "Hitbox Size", 1, 60, 2, function(v) playerHitboxSize = v end)
+makeToggle(contents[7], "Transparent", true, function(v) playerHitboxTransparent = v end)
 contents[7].CanvasSize = UDim2.new(0, 0, 0, 500)
 
+-- UNLOAD
 local unload = Instance.new("TextButton")
 unload.Size = UDim2.new(1, 0, 0, 45)
 unload.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
@@ -1143,10 +813,8 @@ Instance.new("UICorner", unload).CornerRadius = UDim.new(0, 8)
 unload.MouseButton1Click:Connect(function()
     farmEnabled = false
     flying = false
-    showHitboxes = false
     infJumpEnabled = false
     autoSafeEnabled = false
-    autoLevelEnabled = false
     espEnabled = false
     aimbotEnabled = false
     auraEnabled = false
@@ -1154,7 +822,6 @@ unload.MouseButton1Click:Connect(function()
     if autoSafeConnection then autoSafeConnection:Disconnect() end
     stopFarmFarm()
     stopFlying()
-    stopAutoLevel()
     toggleNoclip(false)
     removeWaterWalk()
     closeAllUIs()
@@ -1164,6 +831,7 @@ end)
 
 contents[8].CanvasSize = UDim2.new(0, 0, 0, 100)
 
+-- AFK
 spawn(function()
     while true do
         if antiAFKEnabled then
@@ -1173,6 +841,7 @@ spawn(function()
     end
 end)
 
+-- OPEN
 openBtn.MouseButton1Click:Connect(function() menu.Visible = true end)
 closeBtn.MouseButton1Click:Connect(function() menu.Visible = false end)
 
